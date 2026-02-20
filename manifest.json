@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Group Tabs",
+  "version": "1.0.0",
+  "description": "A fast new tab page with expandable groups containing links and todos.",
+  "permissions": ["storage"],
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  }
+}

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>New tab</title>
+    <link rel="stylesheet" href="newtab.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">G</div>
+        <div>
+          <div class="title">Anuj's Space</div>
+          <div class="subtitle">Data Engineer's storage rack</div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="btnExport" class="btn btnSecondary" title="Export JSON">Export</button>
+        <label class="btn btnSecondary fileLabel" title="Import JSON">
+          Import
+          <input id="importFile" type="file" accept="application/json" hidden />
+        </label>
+        <button id="btnAddGroup" class="btn">+ Group</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="panel">
+        <div class="panelHeader">
+          <input
+            id="search"
+            class="search"
+            type="search"
+            placeholder="Search groups/items..."
+            autocomplete="off"
+          />
+          <div class="meta" id="meta"></div>
+        </div>
+
+        <div id="groups" class="groups"></div>
+
+        <div id="trashWrap" class="trashWrap" hidden>
+          <div class="trashHeader">Deleted (auto-removed after 30 days)</div>
+          <div id="trash" class="groups"></div>
+        </div>
+
+        <template id="groupTpl">
+          <article class="group" data-group-id="">
+            <div class="groupHeader">
+              <button
+                class="iconBtn dragHandle"
+                data-action="drag-group"
+                title="Drag to reorder"
+                draggable="true"
+              >
+                ⋮⋮
+              </button>
+              <div class="groupTitleWrap">
+                <div class="groupTitle" data-field="title"></div>
+                <div class="groupDesc" data-field="desc"></div>
+              </div>
+
+              <div class="groupBtns">
+                <button class="iconBtn" data-action="edit-group" title="Edit group">✎</button>
+                <button class="iconBtn danger" data-action="delete-group" title="Delete group">🗑</button>
+              </div>
+            </div>
+
+            <div class="groupBody" hidden>
+              <ul class="items" data-field="items"></ul>
+              <div class="addRow">
+                <input class="inp" data-field="newText" placeholder="Add text or paste a link…" />
+                <button class="btnSmall" data-action="quick-add">Add</button>
+              </div>
+            </div>
+          </article>
+        </template>
+
+        <template id="itemTpl">
+          <li class="item" data-item-id="">
+            <label class="check">
+              <input type="checkbox" data-action="toggle-done" />
+              <span></span>
+            </label>
+
+            <div class="itemMain">
+              <div class="itemText" data-field="text"></div>
+              <a class="itemLink" data-field="link" target="_blank" rel="noopener noreferrer"></a>
+            </div>
+
+            <div class="itemBtns">
+              <button class="iconBtn" data-action="edit-item" title="Edit item">✎</button>
+              <button class="iconBtn danger" data-action="delete-item" title="Delete item">🗑</button>
+            </div>
+          </li>
+        </template>
+      </section>
+
+    </main>
+
+    <dialog id="dlg" class="dlg">
+      <form method="dialog" class="dlgForm" id="dlgForm">
+        <h2 id="dlgTitle">Edit</h2>
+        <div id="dlgBody"></div>
+        <menu class="dlgMenu">
+          <button value="cancel" class="btn btnSecondary">Cancel</button>
+          <button id="dlgOk" value="ok" class="btn">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="newtab.js"></script>
+  </body>
+</html>
