@@ -75,6 +75,7 @@ let dragGroupId = null;
 let dragOverNode = null;
 let dragTodoId = null;
 let todoDragOverNode = null;
+let activeItemEdit = null;
 
 function normalizeGroupColor(color) {
   const key = String(color || "default").toLowerCase();
@@ -427,6 +428,14 @@ function openDialog(title, fields, onSubmit) {
   }
 
   const form = $("#dlgForm");
+  const keyHandler = (ev) => {
+    if (ev.key !== "Enter") return;
+    const tag = ev.target?.tagName;
+    if (tag === "TEXTAREA") return;
+    ev.preventDefault();
+    els.dlg.close("ok");
+  };
+
   const handler = (ev) => {
     // dialog returns close event after submit; use returnValue
     if (els.dlg.returnValue !== "ok") return cleanup();
@@ -442,8 +451,10 @@ function openDialog(title, fields, onSubmit) {
   function cleanup() {
     form.removeEventListener("close", handler);
     els.dlg.removeEventListener("close", handler);
+    els.dlgBody.removeEventListener("keydown", keyHandler);
   }
 
+  els.dlgBody.addEventListener("keydown", keyHandler);
   els.dlg.addEventListener("close", handler, { once: true });
   els.dlg.showModal();
 }
@@ -567,45 +578,72 @@ function addItem(groupId, value) {
   render();
 }
 
-function editItem(groupId, itemId) {
+function finishInlineItemEdit(save) {
+  if (!activeItemEdit) return;
+  const { groupId, itemId, input } = activeItemEdit;
+  activeItemEdit = null;
+
   const g = getGroup(groupId);
   if (!g) return;
   const it = getItem(g, itemId);
   if (!it) return;
 
-  openDialog(
-    "Edit item",
-    [
-      {
-        name: "value",
-        label: "Text or URL",
-        type: "text",
-        value: it.value,
-        placeholder: "e.g. https://jira... or 'Write release note'",
-      },
-      {
-        name: "kind",
-        label: "Type",
-        type: "select",
-        value: it.kind,
-        options: [
-          { value: "text", label: "Text" },
-          { value: "link", label: "Link" },
-        ],
-      },
-    ],
-    (vals) => {
-      const v = (vals.value || "").trim();
-      if (!v) return;
-      it.value = v;
-      it.kind = vals.kind === "link" ? "link" : isLikelyUrl(v) ? "link" : "text";
-      scheduleSave();
-      render();
-    }
-  );
+  const v = (input?.value || "").trim();
+  if (save && v && v !== it.value) {
+    it.value = v;
+    it.kind = isLikelyUrl(v) ? "link" : "text";
+    scheduleSave();
+  }
+  render();
+}
+
+function startInlineItemEdit(groupId, itemId, itemNode) {
+  if (!groupId || !itemId || !itemNode) return;
+  if (activeItemEdit?.groupId === groupId && activeItemEdit?.itemId === itemId) {
+    activeItemEdit.input?.focus();
+    activeItemEdit.input?.select();
+    return;
+  }
+  if (activeItemEdit) finishInlineItemEdit(true);
+  itemNode =
+    els.groups
+      .querySelector(`[data-group-id="${groupId}"]`)
+      ?.querySelector(`[data-item-id="${itemId}"]`) || itemNode;
+
+  const g = getGroup(groupId);
+  if (!g) return;
+  const it = getItem(g, itemId);
+  if (!it) return;
+
+  const main = itemNode.querySelector(".itemMain");
+  if (!main) return;
+
+  const input = document.createElement("input");
+  input.className = "itemInlineInput";
+  input.value = it.value;
+  input.placeholder = "Edit item...";
+
+  itemNode.dataset.editing = "1";
+  main.textContent = "";
+  main.appendChild(input);
+
+  activeItemEdit = { groupId, itemId, input };
+  input.addEventListener("blur", () => finishInlineItemEdit(true), { once: true });
+  input.focus();
+  input.select();
+}
+
+function editItem(groupId, itemId) {
+  const groupNode = els.groups.querySelector(`[data-group-id="${groupId}"]`);
+  const itemNode = groupNode?.querySelector(`[data-item-id="${itemId}"]`);
+  if (!itemNode) return;
+  startInlineItemEdit(groupId, itemId, itemNode);
 }
 
 function deleteItem(groupId, itemId) {
+  if (activeItemEdit?.groupId === groupId && activeItemEdit?.itemId === itemId) {
+    activeItemEdit = null;
+  }
   const g = getGroup(groupId);
   if (!g) return;
   const idx = removeById(g.items, itemId);
@@ -616,6 +654,9 @@ function deleteItem(groupId, itemId) {
 }
 
 function toggleDone(groupId, itemId) {
+  if (activeItemEdit?.groupId === groupId && activeItemEdit?.itemId === itemId) {
+    finishInlineItemEdit(true);
+  }
   const g = getGroup(groupId);
   if (!g) return;
   const it = getItem(g, itemId);
@@ -691,9 +732,11 @@ function importJsonFile(file) {
       const parsed = JSON.parse(String(reader.result || ""));
       if (!parsed || !Array.isArray(parsed.groups)) throw new Error("Bad format");
       const trash = Array.isArray(parsed.trash) ? parsed.trash : [];
+      const todos = Array.isArray(parsed.todos) ? parsed.todos : [];
       for (const g of parsed.groups) sanitizeGroupShape(g);
       for (const g of trash) sanitizeGroupShape(g);
-      state.data = { version: 1, groups: parsed.groups, trash };
+      for (const todo of todos) sanitizeTodoShape(todo);
+      state.data = { version: 1, groups: parsed.groups, trash, todos };
       await saveNow();
       render();
     } catch (e) {
@@ -770,13 +813,25 @@ function handleGroupClick(e) {
   else if (action === "edit-group") editGroup(groupId);
   else if (action === "delete-group") deleteGroup(groupId);
   else if (action === "quick-add") handleQuickAdd(groupNode);
-  else if (action === "edit-item" && itemId) editItem(groupId, itemId);
   else if (action === "delete-item" && itemId) deleteItem(groupId, itemId);
   else if (action === "restore-group") restoreGroup(groupId);
   else if (action === "purge-group") purgeGroup(groupId);
 }
 
+function handleGroupDoubleClick(e) {
+  const groupNode = e.target.closest(".group");
+  const groupId = groupNode?.dataset.groupId;
+  if (!groupId || groupNode?.dataset.trash) return;
+  const itemNode = e.target.closest(".item");
+  const itemId = itemNode?.dataset.itemId;
+  const itemMain = e.target.closest(".itemMain");
+  if (!itemMain || !itemId) return;
+  e.preventDefault();
+  startInlineItemEdit(groupId, itemId, itemNode);
+}
+
 els.groups.addEventListener("click", handleGroupClick);
+els.groups.addEventListener("dblclick", handleGroupDoubleClick);
 els.trash.addEventListener("click", handleGroupClick);
 
 els.todoList.addEventListener("click", (e) => {
@@ -887,6 +942,18 @@ els.todoList.addEventListener("dragend", () => {
 });
 
 els.groups.addEventListener("keydown", (e) => {
+  if (e.target.matches(".itemInlineInput")) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finishInlineItemEdit(true);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      finishInlineItemEdit(false);
+      return;
+    }
+  }
   if (e.key !== "Enter") return;
   const groupNode = e.target.closest(".group");
   if (!groupNode) return;
