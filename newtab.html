@@ -98,6 +98,38 @@
         </template>
       </section>
 
+      <aside class="panel todoPanel">
+        <div class="panelHeader todoHeader">
+          <div class="todoTitle">Todo</div>
+        </div>
+
+        <div class="todoAddRow">
+          <input id="todoInput" class="inp" placeholder="Add todo..." autocomplete="off" />
+          <button id="btnAddTodo" class="btnSmall">Add</button>
+        </div>
+
+        <ul id="todoList" class="todoList"></ul>
+
+        <template id="todoTpl">
+          <li class="todoItem" data-todo-id="">
+            <button
+              class="iconBtn dragHandle"
+              data-action="drag-todo"
+              title="Drag to reorder"
+              draggable="true"
+            >
+              ⋮⋮
+            </button>
+
+            <div class="todoText" data-field="text"></div>
+
+            <div class="itemBtns">
+              <button class="iconBtn" data-action="edit-todo" title="Edit todo">✎</button>
+              <button class="iconBtn danger" data-action="delete-todo" title="Delete todo">🗑</button>
+            </div>
+          </li>
+        </template>
+      </aside>
     </main>
 
     <dialog id="dlg" class="dlg">

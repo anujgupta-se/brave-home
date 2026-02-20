@@ -43,6 +43,9 @@ const els = {
   groups: $("#groups"),
   trashWrap: $("#trashWrap"),
   trash: $("#trash"),
+  todoList: $("#todoList"),
+  todoInput: $("#todoInput"),
+  btnAddTodo: $("#btnAddTodo"),
   meta: $("#meta"),
   search: $("#search"),
   btnAddGroup: $("#btnAddGroup"),
@@ -50,6 +53,7 @@ const els = {
   importFile: $("#importFile"),
   groupTpl: $("#groupTpl"),
   itemTpl: $("#itemTpl"),
+  todoTpl: $("#todoTpl"),
   dlg: $("#dlg"),
   dlgTitle: $("#dlgTitle"),
   dlgBody: $("#dlgBody"),
@@ -61,6 +65,7 @@ const state = {
     version: 1,
     groups: [],
     trash: [],
+    todos: [],
   },
   filter: "",
   saveTimer: null,
@@ -68,6 +73,8 @@ const state = {
 
 let dragGroupId = null;
 let dragOverNode = null;
+let dragTodoId = null;
+let todoDragOverNode = null;
 
 function normalizeGroupColor(color) {
   const key = String(color || "default").toLowerCase();
@@ -96,6 +103,11 @@ function sanitizeGroupShape(g) {
   g.title = String(g.title ?? "Untitled");
   g.desc = String(g.desc ?? "");
   g.color = normalizeGroupColor(g.color);
+}
+
+function sanitizeTodoShape(todo) {
+  if (!todo.id) todo.id = uid();
+  todo.text = String(todo.text ?? "").trim();
 }
 
 function uid() {
@@ -140,8 +152,11 @@ async function load() {
   const loaded = res?.[STORAGE_KEY];
   if (loaded?.groups) state.data = loaded;
   if (!Array.isArray(state.data.trash)) state.data.trash = [];
+  if (!Array.isArray(state.data.todos)) state.data.todos = [];
   for (const g of state.data.groups) sanitizeGroupShape(g);
   for (const g of state.data.trash) sanitizeGroupShape(g);
+  for (const todo of state.data.todos) sanitizeTodoShape(todo);
+  state.data.todos = state.data.todos.filter((todo) => todo.text);
 
   const pruned = pruneTrash();
   if (pruned) await saveNow();
@@ -167,8 +182,9 @@ function setMeta() {
   const g = state.data.groups.length;
   let items = 0;
   for (const gr of state.data.groups) items += gr.items.length;
+  const todos = state.data.todos.length;
   const f = state.filter ? ` • filtered` : "";
-  els.meta.textContent = `${g} groups • ${items} items${f}`;
+  els.meta.textContent = `${g} groups • ${items} items • ${todos} todos${f}`;
 }
 
 function matchesFilter(group) {
@@ -182,6 +198,7 @@ function matchesFilter(group) {
 function render() {
   els.groups.textContent = "";
   els.trash.textContent = "";
+  els.todoList.textContent = "";
   const frag = document.createDocumentFragment();
 
   const groups = state.data.groups.filter(matchesFilter);
@@ -189,7 +206,22 @@ function render() {
 
   els.groups.appendChild(frag);
   renderTrash();
+  renderTodos();
   setMeta();
+}
+
+function renderTodos() {
+  const frag = document.createDocumentFragment();
+  for (const todo of state.data.todos) frag.appendChild(renderTodoItem(todo));
+  els.todoList.appendChild(frag);
+}
+
+function renderTodoItem(todo) {
+  const li = els.todoTpl.content.firstElementChild.cloneNode(true);
+  li.dataset.todoId = todo.id;
+  const textEl = li.querySelector('[data-field="text"]');
+  textEl.textContent = todo.text;
+  return li;
 }
 
 function renderGroup(group) {
@@ -318,6 +350,10 @@ function removeById(arr, id) {
   return idx;
 }
 
+function getTodo(todoId) {
+  return state.data.todos.find((todo) => todo.id === todoId);
+}
+
 function reorderGroups(dragId, targetId) {
   if (!dragId || dragId === targetId) return;
   const arr = state.data.groups;
@@ -328,6 +364,23 @@ function reorderGroups(dragId, targetId) {
     arr.push(moved);
   } else {
     const to = arr.findIndex((g) => g.id === targetId);
+    if (to < 0) arr.push(moved);
+    else arr.splice(to, 0, moved);
+  }
+  scheduleSave();
+  render();
+}
+
+function reorderTodos(dragId, targetId) {
+  if (!dragId || dragId === targetId) return;
+  const arr = state.data.todos;
+  const from = arr.findIndex((todo) => todo.id === dragId);
+  if (from < 0) return;
+  const [moved] = arr.splice(from, 1);
+  if (!targetId) {
+    arr.push(moved);
+  } else {
+    const to = arr.findIndex((todo) => todo.id === targetId);
     if (to < 0) arr.push(moved);
     else arr.splice(to, 0, moved);
   }
@@ -585,6 +638,40 @@ function handleQuickAdd(groupNode) {
   addItem(groupId, inp.value);
 }
 
+function addTodo(text) {
+  const value = (text || "").trim();
+  if (!value) return;
+  state.data.todos.unshift({ id: uid(), text: value });
+  scheduleSave();
+  render();
+  els.todoInput.value = "";
+  els.todoInput.focus();
+}
+
+function editTodo(todoId) {
+  const todo = getTodo(todoId);
+  if (!todo) return;
+  openDialog(
+    "Edit todo",
+    [{ name: "text", label: "Todo", type: "text", value: todo.text }],
+    (vals) => {
+      const next = (vals.text || "").trim();
+      if (!next) return;
+      todo.text = next;
+      scheduleSave();
+      render();
+    }
+  );
+}
+
+function deleteTodo(todoId) {
+  const idx = removeById(state.data.todos, todoId);
+  if (idx >= 0) {
+    scheduleSave();
+    render();
+  }
+}
+
 function exportJson() {
   const blob = new Blob([JSON.stringify(state.data, null, 2)], {
     type: "application/json",
@@ -620,6 +707,7 @@ function importJsonFile(file) {
 
 els.btnAddGroup.addEventListener("click", addGroup);
 els.btnExport.addEventListener("click", exportJson);
+els.btnAddTodo.addEventListener("click", () => addTodo(els.todoInput.value));
 
 els.importFile.addEventListener("change", (e) => {
   const f = e.target.files?.[0];
@@ -630,6 +718,12 @@ els.importFile.addEventListener("change", (e) => {
 els.search.addEventListener("input", () => {
   state.filter = els.search.value || "";
   render();
+});
+
+els.todoInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  addTodo(els.todoInput.value);
 });
 
 function handleGroupClick(e) {
@@ -685,6 +779,17 @@ function handleGroupClick(e) {
 els.groups.addEventListener("click", handleGroupClick);
 els.trash.addEventListener("click", handleGroupClick);
 
+els.todoList.addEventListener("click", (e) => {
+  const todoNode = e.target.closest(".todoItem");
+  const todoId = todoNode?.dataset.todoId;
+  if (!todoId) return;
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === "edit-todo") editTodo(todoId);
+  else if (action === "delete-todo") deleteTodo(todoId);
+});
+
 els.groups.addEventListener("dragstart", (e) => {
   const handle = e.target.closest('[data-action="drag-group"]');
   if (!handle) {
@@ -731,6 +836,54 @@ els.groups.addEventListener("dragend", () => {
   if (dragOverNode) dragOverNode.classList.remove("drag-over");
   dragOverNode = null;
   dragGroupId = null;
+});
+
+els.todoList.addEventListener("dragstart", (e) => {
+  const handle = e.target.closest('[data-action="drag-todo"]');
+  if (!handle) {
+    e.preventDefault();
+    return;
+  }
+  const todoNode = handle.closest(".todoItem");
+  if (!todoNode) return;
+  dragTodoId = todoNode.dataset.todoId || null;
+  todoNode.classList.add("dragging");
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragTodoId || "");
+  }
+});
+
+els.todoList.addEventListener("dragover", (e) => {
+  if (!dragTodoId) return;
+  e.preventDefault();
+  const todoNode = e.target.closest(".todoItem");
+  if (!todoNode || todoNode.dataset.todoId === dragTodoId) return;
+  if (todoDragOverNode && todoDragOverNode !== todoNode) {
+    todoDragOverNode.classList.remove("drag-over");
+  }
+  todoDragOverNode = todoNode;
+  todoDragOverNode.classList.add("drag-over");
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+});
+
+els.todoList.addEventListener("drop", (e) => {
+  if (!dragTodoId) return;
+  e.preventDefault();
+  const todoNode = e.target.closest(".todoItem");
+  const targetId = todoNode?.dataset.todoId || null;
+  reorderTodos(dragTodoId, targetId);
+  if (todoDragOverNode) todoDragOverNode.classList.remove("drag-over");
+  todoDragOverNode = null;
+  dragTodoId = null;
+});
+
+els.todoList.addEventListener("dragend", () => {
+  const dragging = els.todoList.querySelector(".todoItem.dragging");
+  if (dragging) dragging.classList.remove("dragging");
+  if (todoDragOverNode) todoDragOverNode.classList.remove("drag-over");
+  todoDragOverNode = null;
+  dragTodoId = null;
 });
 
 els.groups.addEventListener("keydown", (e) => {
