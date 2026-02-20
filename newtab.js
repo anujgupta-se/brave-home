@@ -5,6 +5,37 @@
 */
 
 const STORAGE_KEY = "tgnt_v1";
+const GROUP_COLOR_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "yellow", label: "Yellow" },
+  { value: "blue", label: "Blue" },
+  { value: "green", label: "Green" },
+  { value: "pink", label: "Pink" },
+  { value: "purple", label: "Purple" },
+  { value: "orange", label: "Orange" },
+  { value: "teal", label: "Teal" },
+  { value: "red", label: "Red" },
+  { value: "mint", label: "Mint" },
+  { value: "lavender", label: "Lavender" },
+  { value: "peach", label: "Peach" },
+  { value: "gray", label: "Gray" },
+];
+
+const GROUP_COLOR_STYLES = {
+  default: null,
+  yellow: { bg: "#3a2a14", border: "rgba(242,161,0,0.35)" },
+  blue: { bg: "#1c2b3a", border: "rgba(114,170,255,0.35)" },
+  green: { bg: "#1d3227", border: "rgba(96,194,141,0.35)" },
+  pink: { bg: "#38232b", border: "rgba(228,127,160,0.35)" },
+  purple: { bg: "#2a2136", border: "rgba(180,140,255,0.35)" },
+  orange: { bg: "#3a2418", border: "rgba(255,170,90,0.35)" },
+  teal: { bg: "#182f33", border: "rgba(110,220,210,0.35)" },
+  red: { bg: "#361b1f", border: "rgba(255,120,130,0.35)" },
+  mint: { bg: "#193126", border: "rgba(140,255,200,0.35)" },
+  lavender: { bg: "#2d2436", border: "rgba(210,170,255,0.35)" },
+  peach: { bg: "#3a2422", border: "rgba(255,190,170,0.35)" },
+  gray: { bg: "#24262b", border: "rgba(180,180,190,0.25)" },
+};
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -37,6 +68,35 @@ const state = {
 
 let dragGroupId = null;
 let dragOverNode = null;
+
+function normalizeGroupColor(color) {
+  const key = String(color || "default").toLowerCase();
+  return Object.prototype.hasOwnProperty.call(GROUP_COLOR_STYLES, key)
+    ? key
+    : "default";
+}
+
+function applyGroupColor(node, color) {
+  const style = GROUP_COLOR_STYLES[normalizeGroupColor(color)];
+  if (!style) return;
+  node.style.backgroundColor = style.bg;
+  node.style.borderColor = style.border;
+}
+
+function sanitizeGroupShape(g) {
+  if (!g.id) g.id = uid();
+  if (!Array.isArray(g.items)) g.items = [];
+  for (const it of g.items) {
+    if (!it.id) it.id = uid();
+    it.done = !!it.done;
+    it.kind = it.kind === "link" ? "link" : "text";
+    it.value = String(it.value ?? "");
+  }
+  g.open = !!g.open;
+  g.title = String(g.title ?? "Untitled");
+  g.desc = String(g.desc ?? "");
+  g.color = normalizeGroupColor(g.color);
+}
 
 function uid() {
   // compact id: time + random
@@ -80,6 +140,8 @@ async function load() {
   const loaded = res?.[STORAGE_KEY];
   if (loaded?.groups) state.data = loaded;
   if (!Array.isArray(state.data.trash)) state.data.trash = [];
+  for (const g of state.data.groups) sanitizeGroupShape(g);
+  for (const g of state.data.trash) sanitizeGroupShape(g);
 
   const pruned = pruneTrash();
   if (pruned) await saveNow();
@@ -89,6 +151,7 @@ async function load() {
       id: uid(),
       title: "Example: TICKET-1234",
       desc: "Expand me. Add links and todos.",
+      color: "default",
       open: true,
       items: [
         { id: uid(), done: false, kind: "link", value: "https://example.com" },
@@ -134,6 +197,7 @@ function renderGroup(group) {
   node.dataset.groupId = group.id;
   node.dataset.open = group.open ? "1" : "0";
   node.draggable = false;
+  applyGroupColor(node, group.color);
 
   const titleEl = node.querySelector('[data-field="title"]');
   const descEl = node.querySelector('[data-field="desc"]');
@@ -176,6 +240,7 @@ function renderTrashGroup(group) {
   node.dataset.open = group.open ? "1" : "0";
   node.dataset.trash = "1";
   node.draggable = false;
+  applyGroupColor(node, group.color);
 
   const titleEl = node.querySelector('[data-field="title"]');
   const descEl = node.querySelector('[data-field="desc"]');
@@ -335,6 +400,7 @@ function addGroup() {
     id: uid(),
     title: "New group",
     desc: "",
+    color: "default",
     open: true,
     items: [],
   };
@@ -352,10 +418,18 @@ function editGroup(groupId) {
     [
       { name: "title", label: "Title", type: "text", value: g.title },
       { name: "desc", label: "Description", type: "textarea", value: g.desc },
+      {
+        name: "color",
+        label: "Background color",
+        type: "select",
+        value: normalizeGroupColor(g.color),
+        options: GROUP_COLOR_OPTIONS,
+      },
     ],
     (vals) => {
       g.title = (vals.title || "").trim() || "Untitled";
       g.desc = (vals.desc || "").trim();
+      g.color = normalizeGroupColor(vals.color);
       scheduleSave();
       render();
     }
@@ -529,21 +603,10 @@ function importJsonFile(file) {
     try {
       const parsed = JSON.parse(String(reader.result || ""));
       if (!parsed || !Array.isArray(parsed.groups)) throw new Error("Bad format");
-      // basic sanitize
-      for (const g of parsed.groups) {
-        if (!g.id) g.id = uid();
-        if (!Array.isArray(g.items)) g.items = [];
-        for (const it of g.items) {
-          if (!it.id) it.id = uid();
-          it.done = !!it.done;
-          it.kind = it.kind === "link" ? "link" : "text";
-          it.value = String(it.value ?? "");
-        }
-        g.open = !!g.open;
-        g.title = String(g.title ?? "Untitled");
-        g.desc = String(g.desc ?? "");
-      }
-      state.data = { version: 1, groups: parsed.groups };
+      const trash = Array.isArray(parsed.trash) ? parsed.trash : [];
+      for (const g of parsed.groups) sanitizeGroupShape(g);
+      for (const g of trash) sanitizeGroupShape(g);
+      state.data = { version: 1, groups: parsed.groups, trash };
       await saveNow();
       render();
     } catch (e) {
