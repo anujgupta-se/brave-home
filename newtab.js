@@ -99,6 +99,7 @@ function sanitizeGroupShape(g) {
     it.done = !!it.done;
     it.kind = it.kind === "link" ? "link" : "text";
     it.value = String(it.value ?? "");
+    it.desc = String(it.desc ?? "");
   }
   g.open = !!g.open;
   g.title = String(g.title ?? "Untitled");
@@ -193,7 +194,10 @@ function matchesFilter(group) {
   if (!f) return true;
   if ((group.title || "").toLowerCase().includes(f)) return true;
   if ((group.desc || "").toLowerCase().includes(f)) return true;
-  return group.items.some((it) => (it.value || "").toLowerCase().includes(f));
+  return group.items.some((it) => {
+    if ((it.value || "").toLowerCase().includes(f)) return true;
+    return (it.desc || "").toLowerCase().includes(f);
+  });
 }
 
 function render() {
@@ -316,22 +320,26 @@ function renderItem(item) {
   li.dataset.itemId = item.id;
   li.dataset.done = item.done ? "1" : "0";
   li.dataset.kind = item.kind;
+  li.dataset.hasDesc = item.desc ? "1" : "0";
 
   const cb = li.querySelector('input[type="checkbox"]');
   cb.checked = !!item.done;
 
   const textEl = li.querySelector('[data-field="text"]');
   const linkEl = li.querySelector('[data-field="link"]');
+  const descEl = li.querySelector('[data-field="desc"]');
 
   if (item.kind === "link") {
     const href = normalizeUrl(item.value);
     linkEl.href = href;
     linkEl.textContent = item.value;
     textEl.textContent = "";
+    descEl.textContent = item.desc || "";
   } else {
     textEl.textContent = item.value;
     linkEl.href = "";
     linkEl.textContent = "";
+    descEl.textContent = "";
   }
 
   return li;
@@ -561,7 +569,54 @@ function toggleGroup(groupId) {
   if (!node) return;
   node.dataset.open = g.open ? "1" : "0";
   const body = node.querySelector(".groupBody");
-  body.hidden = !g.open;
+  if (!body) return;
+  if (g.open) expandGroupBody(body);
+  else collapseGroupBody(body);
+}
+
+function expandGroupBody(body) {
+  clearBodyAnimation(body);
+  body.hidden = false;
+  const startHeight = body.getBoundingClientRect().height;
+  body.style.height = `${startHeight}px`;
+  // Force layout before transitioning to target height.
+  body.getBoundingClientRect();
+  body.style.height = `${body.scrollHeight}px`;
+
+  const onEnd = (e) => {
+    if (e.propertyName !== "height") return;
+    body.style.height = "";
+    body._heightTransitionHandler = null;
+    body.removeEventListener("transitionend", onEnd);
+  };
+  body._heightTransitionHandler = onEnd;
+  body.addEventListener("transitionend", onEnd);
+}
+
+function collapseGroupBody(body) {
+  clearBodyAnimation(body);
+  if (body.hidden) return;
+  body.style.height = `${body.scrollHeight}px`;
+  // Force layout before transitioning to 0.
+  body.getBoundingClientRect();
+  body.style.height = "0px";
+
+  const onEnd = (e) => {
+    if (e.propertyName !== "height") return;
+    body.hidden = true;
+    body.style.height = "";
+    body._heightTransitionHandler = null;
+    body.removeEventListener("transitionend", onEnd);
+  };
+  body._heightTransitionHandler = onEnd;
+  body.addEventListener("transitionend", onEnd);
+}
+
+function clearBodyAnimation(body) {
+  if (body._heightTransitionHandler) {
+    body.removeEventListener("transitionend", body._heightTransitionHandler);
+    body._heightTransitionHandler = null;
+  }
 }
 
 function addItem(groupId, value) {
@@ -573,7 +628,7 @@ function addItem(groupId, value) {
 
   const kind = isLikelyUrl(v) ? "link" : "text";
   g.open = true;
-  g.items.push({ id: uid(), done: false, kind, value: v });
+  g.items.push({ id: uid(), done: false, kind, value: v, desc: "" });
   scheduleSave();
   render();
 }
@@ -638,6 +693,35 @@ function editItem(groupId, itemId) {
   const itemNode = groupNode?.querySelector(`[data-item-id="${itemId}"]`);
   if (!itemNode) return;
   startInlineItemEdit(groupId, itemId, itemNode);
+}
+
+function editLinkItem(groupId, itemId) {
+  const g = getGroup(groupId);
+  if (!g) return;
+  const it = getItem(g, itemId);
+  if (!it || it.kind !== "link") return;
+
+  openDialog(
+    "Edit link",
+    [
+      { name: "value", label: "Link", type: "text", value: it.value },
+      {
+        name: "desc",
+        label: "Description",
+        type: "textarea",
+        value: it.desc || "",
+      },
+    ],
+    (vals) => {
+      const nextValue = (vals.value || "").trim();
+      if (!nextValue) return;
+      it.value = nextValue;
+      it.desc = (vals.desc || "").trim();
+      it.kind = isLikelyUrl(nextValue) ? "link" : "text";
+      scheduleSave();
+      render();
+    }
+  );
 }
 
 function deleteItem(groupId, itemId) {
@@ -813,6 +897,10 @@ function handleGroupClick(e) {
   else if (action === "edit-group") editGroup(groupId);
   else if (action === "delete-group") deleteGroup(groupId);
   else if (action === "quick-add") handleQuickAdd(groupNode);
+  else if (action === "edit-item" && itemId) {
+    if (itemNode?.dataset.kind === "link") editLinkItem(groupId, itemId);
+    else editItem(groupId, itemId);
+  }
   else if (action === "delete-item" && itemId) deleteItem(groupId, itemId);
   else if (action === "restore-group") restoreGroup(groupId);
   else if (action === "purge-group") purgeGroup(groupId);
@@ -827,6 +915,10 @@ function handleGroupDoubleClick(e) {
   const itemMain = e.target.closest(".itemMain");
   if (!itemMain || !itemId) return;
   e.preventDefault();
+  if (itemNode?.dataset.kind === "link") {
+    editLinkItem(groupId, itemId);
+    return;
+  }
   startInlineItemEdit(groupId, itemId, itemNode);
 }
 
