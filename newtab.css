@@ -326,6 +326,7 @@ body {
   align-items: flex-start;
   gap: 4px;
   width: 100%;
+  overflow: hidden;
 }
 
 .itemInlineInput {
@@ -350,6 +351,8 @@ body {
   display: none;
   color: var(--text);
   text-decoration: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .itemLink:hover {
@@ -361,7 +364,7 @@ body {
 }
 
 .item[data-kind="link"] .itemLink {
-  display: inline-block;
+  display: block;
 }
 
 .item[data-kind="link"] {
@@ -386,6 +389,7 @@ body {
 .itemBtns {
   display: flex;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .item[data-done="1"] {
